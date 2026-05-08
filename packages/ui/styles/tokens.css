@@ -89,6 +89,14 @@
     --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
     --sidebar-border: oklch(0.92 0.004 286.32);
     --sidebar-ring: oklch(0.705 0.015 286.067);
+    /* --brand: product accent (multica blue, hue 255 in OKLCH).
+       Usage policy: avoid solid bg-brand on surfaces wider than ~16px. Large
+       fills should tint via /5..15 opacity (e.g. bg-brand/8 for "selected"
+       rows, bg-brand/5 for highlighted comments, bg-brand/12 for chips).
+       Solid bg-brand is reserved for ≤8px dots, small badges, and 1px focus
+       borders. text-brand at any size is fine for accents (links, mention
+       refs). Violating this rule makes the surface read as "product loud"
+       instead of "product accent" — see the mobile pre-2026-05 brand audit. */
     --brand: oklch(0.55 0.16 255);
     --brand-foreground: oklch(0.985 0 0);
     --success: oklch(0.55 0.16 145);
