@@ -293,7 +293,7 @@ describe("AgentCreatePanel", () => {
     mockProjectsQuery.data = [];
     mockProjectsQuery.isSuccess = true;
 
-    renderPanel({ onClose: vi.fn() });
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
     await waitFor(() => {
       expect(mockSetLastProjectId).toHaveBeenCalledWith(null);
@@ -308,7 +308,7 @@ describe("AgentCreatePanel", () => {
     mockProjectsQuery.data = [];
     mockProjectsQuery.isSuccess = false;
 
-    renderPanel({ onClose: vi.fn() });
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
     expect(mockSetLastProjectId).not.toHaveBeenCalled();
   });
