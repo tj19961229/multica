@@ -288,6 +288,24 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 	return workspaces, nil
 }
 
+// WorkspaceDetail mirrors the API's WorkspaceResponse, only the fields the
+// daemon needs (context for per-agent system prompt injection).
+type WorkspaceDetail struct {
+	ID      string  `json:"id"`
+	Name    string  `json:"name"`
+	Context *string `json:"context"`
+}
+
+// GetWorkspace fetches a single workspace's details, including the shared
+// `context` field that the daemon injects as agent system prompt prefix.
+func (c *Client) GetWorkspace(ctx context.Context, workspaceID string) (*WorkspaceDetail, error) {
+	var resp WorkspaceDetail
+	if err := c.getJSON(ctx, "/api/workspaces/"+workspaceID, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // IssueGCStatus holds the minimal issue info returned by the GC check endpoint.
 type IssueGCStatus struct {
 	Status    string    `json:"status"`

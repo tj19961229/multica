@@ -46,6 +46,7 @@ type workspaceState struct {
 	allowedRepoURLs map[string]struct{}
 	taskRepoURLs    map[string]struct{}
 	settings        json.RawMessage // workspace settings (JSONB)
+	context         string          // workspace-level shared system prompt (orchestration protocol)
 	lastRepoSyncErr string
 	repoRefreshMu   sync.Mutex
 }
@@ -715,10 +716,48 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 		d.notifyRuntimeSetChanged()
 	}
 
+	// Refresh workspace.context for every workspace we watch. This populates the
+	// per-workspace orchestration protocol that runTask injects into every agent
+	// via --append-system-prompt, removing the per-task `multica workspace get`
+	// round-trip. Failures are non-fatal; agents fall back to their own fetch.
+	d.refreshWorkspaceContexts(ctx)
+
 	if len(d.allRuntimeIDs()) == 0 && registered == 0 && len(workspaces) > 0 {
 		return fmt.Errorf("failed to register runtimes for any of the %d workspace(s)", len(workspaces))
 	}
 	return nil
+}
+
+// refreshWorkspaceContexts fetches the shared `context` field for every
+// currently watched workspace and updates workspaceState. Best-effort: a
+// failure leaves the previous value in place so the agent still has SOME
+// protocol (stale is better than nil).
+func (d *Daemon) refreshWorkspaceContexts(ctx context.Context) {
+	d.mu.Lock()
+	ids := make([]string, 0, len(d.workspaces))
+	for id := range d.workspaces {
+		ids = append(ids, id)
+	}
+	d.mu.Unlock()
+
+	for _, id := range ids {
+		fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		detail, err := d.client.GetWorkspace(fetchCtx, id)
+		cancel()
+		if err != nil {
+			d.logger.Debug("refresh workspace.context failed", "workspace_id", id, "error", err)
+			continue
+		}
+		ctxStr := ""
+		if detail.Context != nil {
+			ctxStr = *detail.Context
+		}
+		d.mu.Lock()
+		if ws, ok := d.workspaces[id]; ok {
+			ws.context = ctxStr
+		}
+		d.mu.Unlock()
+	}
 }
 
 // heartbeatLoop supervises per-runtime HTTP heartbeat goroutines. Each runtime
@@ -1845,6 +1884,25 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// stuck in `todo`.
 	if providerNeedsInlineSystemPrompt(provider) {
 		execOpts.SystemPrompt = runtimeBrief
+	}
+
+	// Inject the workspace-level shared protocol (workspace.context) so every
+	// agent sees the orchestration rules in its system prompt without paying
+	// for a `multica workspace get` round-trip per task. Empty context (e.g.
+	// workspace not yet refreshed) silently no-ops and the agent falls back to
+	// fetching it from CLI per its Start protocol — belt and suspenders.
+	d.mu.Lock()
+	wsCtx := ""
+	if ws, ok := d.workspaces[task.WorkspaceID]; ok {
+		wsCtx = ws.context
+	}
+	d.mu.Unlock()
+	if wsCtx != "" {
+		if execOpts.SystemPrompt == "" {
+			execOpts.SystemPrompt = wsCtx
+		} else {
+			execOpts.SystemPrompt = execOpts.SystemPrompt + "\n\n---\n\n" + wsCtx
+		}
 	}
 
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
