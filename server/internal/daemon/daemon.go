@@ -1785,6 +1785,26 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.QuickCreatePrompt != "" {
 		agentEnv["MULTICA_QUICK_CREATE_TASK_ID"] = task.ID
 	}
+	// Extract local_path from project.resource (custom type "local_path") so
+	// agents can work on the user's real local project root via --add-dir
+	// instead of being confined to the daemon-managed task workdir (ephemeral).
+	// resource_ref shape: {"path": "/abs/path"}.
+	var localPath string
+	for _, res := range task.ProjectResources {
+		if res.ResourceType != "local_path" {
+			continue
+		}
+		var ref struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(res.ResourceRef, &ref); err == nil && ref.Path != "" {
+			localPath = ref.Path
+			break
+		}
+	}
+	if localPath != "" {
+		agentEnv["MULTICA_PROJECT_LOCAL_PATH"] = localPath
+	}
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
 	// inherit the daemon's PATH. Prepend the directory of the running
@@ -1840,6 +1860,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = task.Agent.McpConfig
+	}
+	// Grant the agent read/write access to the project's local path so it can
+	// edit files there. cwd stays on the daemon-managed task workdir so that
+	// per-task CLAUDE.md / skills / .multica/project/ injection keeps working.
+	if localPath != "" {
+		extraArgs = append(extraArgs, "--add-dir", localPath)
 	}
 	// Two-tier model resolution: an explicit agent.model wins,
 	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If

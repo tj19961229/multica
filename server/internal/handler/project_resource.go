@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -65,9 +66,38 @@ func validateAndNormalizeResourceRef(resourceType string, ref json.RawMessage) (
 	switch resourceType {
 	case "github_repo":
 		return validateGithubRepoRef(ref)
+	case "local_path":
+		return validateLocalPathRef(ref)
 	default:
 		return nil, fmt.Errorf("unknown resource_type %q", resourceType)
 	}
+}
+
+type localPathRef struct {
+	Path string `json:"path"`
+}
+
+// validateLocalPathRef accepts {"path": "/abs/path"} — an absolute filesystem
+// path on the host running the daemon. The daemon turns this into a
+// `--add-dir` argument so agents can read/write the user's real project tree
+// instead of being confined to the ephemeral task workdir.
+func validateLocalPathRef(ref json.RawMessage) (json.RawMessage, error) {
+	var payload localPathRef
+	if err := json.Unmarshal(ref, &payload); err != nil {
+		return nil, fmt.Errorf("invalid local_path payload: %w", err)
+	}
+	payload.Path = strings.TrimSpace(payload.Path)
+	if payload.Path == "" {
+		return nil, errors.New("local_path: path is required")
+	}
+	if !filepath.IsAbs(payload.Path) {
+		return nil, errors.New("local_path: path must be absolute")
+	}
+	out, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 type githubRepoRef struct {
