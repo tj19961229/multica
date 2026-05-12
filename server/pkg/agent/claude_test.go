@@ -414,21 +414,25 @@ func TestBuildEnvNilExtras(t *testing.T) {
 	}
 }
 
-func TestBuildClaudeArgsBlocksMcpConfig(t *testing.T) {
+func TestBuildClaudeArgsAllowsMcpConfig(t *testing.T) {
 	t.Parallel()
 
-	// --mcp-config is hardcoded by the daemon — it must not be overridable via custom_args.
+	// --mcp-config is no longer in claudeBlockedArgs; custom_args may inject it.
+	// (Used together with empty agent.mcp_config so only one --mcp-config reaches the CLI.)
 	args := buildClaudeArgs(ExecOptions{
-		CustomArgs: []string{"--mcp-config", "/tmp/evil.json", "--model", "o3"},
+		CustomArgs: []string{"--mcp-config", "/tmp/user.json", "--model", "o3"},
 	}, slog.Default())
 
+	foundMcp := false
+	foundMcpValue := false
 	for i, a := range args {
-		if a == "--mcp-config" {
-			t.Fatalf("--mcp-config should be blocked from custom_args, found at index %d: %v", i, args)
+		if a == "--mcp-config" && i+1 < len(args) && args[i+1] == "/tmp/user.json" {
+			foundMcp = true
+			foundMcpValue = true
 		}
-		if a == "/tmp/evil.json" {
-			t.Fatalf("--mcp-config value should be consumed when blocking, but found it at index %d: %v", i, args)
-		}
+	}
+	if !foundMcp || !foundMcpValue {
+		t.Fatalf("expected --mcp-config /tmp/user.json to pass through custom_args, got: %v", args)
 	}
 
 	// Non-blocked args should still pass through.
@@ -439,7 +443,7 @@ func TestBuildClaudeArgsBlocksMcpConfig(t *testing.T) {
 		}
 	}
 	if !foundModel {
-		t.Fatalf("expected --model o3 in args after blocking --mcp-config: %v", args)
+		t.Fatalf("expected --model o3 in args: %v", args)
 	}
 }
 

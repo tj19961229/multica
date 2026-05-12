@@ -410,7 +410,6 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 	"--output-format":   blockedWithValue,  // stream-json protocol
 	"--input-format":    blockedWithValue,  // stream-json protocol
 	"--permission-mode": blockedWithValue,  // bypassPermissions for autonomous operation
-	"--mcp-config":      blockedWithValue,  // set by daemon from agent.mcp_config
 }
 
 func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
