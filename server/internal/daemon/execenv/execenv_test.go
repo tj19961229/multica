@@ -2175,3 +2175,131 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 		}
 	})
 }
+
+// firstDiffIndex returns the byte offset of the first difference between two
+// strings, or -1 if they are equal. Used to give actionable error messages in
+// the cache-stability tests below.
+func firstDiffIndex(a, b string) int {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	if len(a) != len(b) {
+		return n
+	}
+	return -1
+}
+
+// TestInjectRuntimeConfigByteIdenticalAcrossTriggers locks in the prompt-cache
+// stability invariant: CLAUDE.md MUST be byte-identical regardless of whether
+// the run was status-triggered (no TriggerCommentID) or comment-triggered (any
+// TriggerCommentID). Background:
+//
+// Claude Code auto-loads CLAUDE.md into the system prompt at every --resume.
+// Anthropic prompt cache hits by exact prefix match. Any byte that varies
+// across trigger types breaks the prefix at that byte and forces all later
+// tokens (rest of CLAUDE.md + entire conversation history) to be re-cached.
+// Empirically this collapsed cache_read on R2-P1 of a 4-run PM epic from
+// ~62k tokens to ~18k (only the Claude Code built-in prefix survived),
+// cascading to every subsequent run in the same session.
+//
+// If this test ever fails, do NOT "fix" it by adjusting the assertion —
+// fix the divergence at the source by moving the dynamic field to the
+// user-message path (see buildCommentPrompt in prompt.go).
+func TestInjectRuntimeConfigByteIdenticalAcrossTriggers(t *testing.T) {
+	t.Parallel()
+
+	statusCtx := TaskContextForEnv{
+		IssueID:   "issue-cache-test",
+		AgentName: "Atlas",
+		AgentID:   "agent-cache-test",
+	}
+	commentCtx := statusCtx
+	commentCtx.TriggerCommentID = "trigger-comment-uuid"
+
+	render := func(t *testing.T, ctx TaskContextForEnv) string {
+		t.Helper()
+		dir := t.TempDir()
+		if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+			t.Fatalf("InjectRuntimeConfig: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+		if err != nil {
+			t.Fatalf("read CLAUDE.md: %v", err)
+		}
+		return string(data)
+	}
+
+	statusContent := render(t, statusCtx)
+	commentContent := render(t, commentCtx)
+
+	if statusContent != commentContent {
+		idx := firstDiffIndex(statusContent, commentContent)
+		windowStart := idx - 80
+		if windowStart < 0 {
+			windowStart = 0
+		}
+		windowEnd := idx + 80
+		if windowEnd > len(statusContent) {
+			windowEnd = len(statusContent)
+		}
+		t.Errorf("CLAUDE.md must be byte-identical across trigger types to preserve prompt prefix cache.\n"+
+			"status_len=%d, comment_len=%d, first_diff_at_byte=%d\n"+
+			"status near diff: %q\n"+
+			"comment near diff: %q",
+			len(statusContent), len(commentContent), idx,
+			statusContent[windowStart:windowEnd],
+			commentContent[windowStart:min(windowEnd, len(commentContent))])
+	}
+}
+
+// TestInjectRuntimeConfigByteIdenticalAcrossTriggerCommentIDs further locks
+// in that the *value* of TriggerCommentID never reaches CLAUDE.md. Two runs
+// with different TriggerCommentID values must produce identical CLAUDE.md.
+// If this regresses, every new comment within an issue invalidates the
+// cache prefix at the point where the UUID is interpolated.
+func TestInjectRuntimeConfigByteIdenticalAcrossTriggerCommentIDs(t *testing.T) {
+	t.Parallel()
+
+	base := TaskContextForEnv{
+		IssueID:   "issue-cache-test",
+		AgentName: "Atlas",
+		AgentID:   "agent-cache-test",
+	}
+	ctxA := base
+	ctxA.TriggerCommentID = "comment-uuid-A"
+	ctxB := base
+	ctxB.TriggerCommentID = "comment-uuid-B"
+
+	render := func(t *testing.T, ctx TaskContextForEnv) string {
+		t.Helper()
+		dir := t.TempDir()
+		if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+			t.Fatalf("InjectRuntimeConfig: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+		if err != nil {
+			t.Fatalf("read CLAUDE.md: %v", err)
+		}
+		return string(data)
+	}
+
+	contentA := render(t, ctxA)
+	contentB := render(t, ctxB)
+
+	if contentA != contentB {
+		idx := firstDiffIndex(contentA, contentB)
+		t.Errorf("CLAUDE.md must NOT vary by TriggerCommentID value.\n"+
+			"first_diff_at_byte=%d\n"+
+			"A near diff: %q\n"+
+			"B near diff: %q",
+			idx,
+			contentA[max(0, idx-40):min(len(contentA), idx+40)],
+			contentB[max(0, idx-40):min(len(contentB), idx+40)])
+	}
+}
