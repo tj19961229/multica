@@ -22,7 +22,9 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // randomID returns a random 16-byte hex string used as a request ID for
@@ -206,6 +208,28 @@ func (h *Handler) publishTask(eventType, workspaceID, actorType, actorID, taskID
 		TaskID:      taskID,
 		Payload:     payload,
 	})
+}
+
+// PublishTaskUsageUpdate broadcasts a turn-level context-size snapshot for an
+// active task. This is non-cumulative — distinct from ReportTaskUsage which
+// records billing-style totals. The function resolves the model's max context
+// window via agent.ContextWindowFor and injects it into the payload so the
+// frontend doesn't need a parallel lookup table.
+//
+// Routed to the per-task scope (TaskID hint) so only subscribers watching
+// this task receive the high-frequency turn pings.
+func (h *Handler) PublishTaskUsageUpdate(workspaceID, taskID, agentID, issueID, model string, promptTokens, cacheReadTokens, cacheWriteTokens int64) {
+	payload := protocol.TaskUsageUpdatePayload{
+		TaskID:           taskID,
+		AgentID:          agentID,
+		IssueID:          issueID,
+		Model:            model,
+		PromptTokens:     promptTokens,
+		CacheReadTokens:  cacheReadTokens,
+		CacheWriteTokens: cacheWriteTokens,
+		MaxContextTokens: agent.ContextWindowFor(model),
+	}
+	h.publishTask(protocol.EventTaskUsageUpdate, workspaceID, "system", "", taskID, payload)
 }
 
 // publishChat is publish() plus a ChatSessionID hint so the realtime layer

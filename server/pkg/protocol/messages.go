@@ -50,6 +50,23 @@ type TaskMessagePayload struct {
 	Output  string         `json:"output,omitempty"`  // tool output (tool_result only)
 }
 
+// TaskUsageUpdatePayload is broadcast at every Claude turn boundary while a
+// task is running. It carries the most recent turn's prompt size — NOT a
+// cumulative total — so frontend can render a "context window used / max"
+// progress bar that disappears when the task ends. MaxContextTokens is
+// resolved server-side via agent.ContextWindowFor(Model) so consumers don't
+// need a parallel lookup table.
+type TaskUsageUpdatePayload struct {
+	TaskID           string `json:"task_id"`
+	AgentID          string `json:"agent_id"`
+	IssueID          string `json:"issue_id"`
+	Model            string `json:"model"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	MaxContextTokens int64  `json:"max_context_tokens"`
+}
+
 // DaemonRegisterPayload is sent from daemon to server on connection.
 type DaemonRegisterPayload struct {
 	DaemonID string        `json:"daemon_id"`

@@ -36,6 +36,12 @@ const (
 	EventTaskFailed    = "task:failed"    // running → failed
 	EventTaskMessage   = "task:message"
 	EventTaskCancelled = "task:cancelled" // * → cancelled
+	// EventTaskUsageUpdate — turn-level context-size snapshot for an active
+	// task. Non-cumulative: payload carries the most recent Claude turn's
+	// prompt size. Consumer (frontend) keeps the latest per task_id and
+	// clears on task:completed/failed/cancelled. Distinct from billing
+	// totals recorded by ReportTaskUsage.
+	EventTaskUsageUpdate = "task:usage_update"
 
 	// Inbox events
 	EventInboxNew           = "inbox:new"
