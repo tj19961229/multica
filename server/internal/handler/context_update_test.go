@@ -215,21 +215,43 @@ func TestReportTaskContextUpdate_RejectsNegativeTokens(t *testing.T) {
 	}
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
 
-	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/context-update",
-		map[string]any{
+	cases := []struct {
+		name string
+		body map[string]any
+	}{
+		{"prompt_tokens", map[string]any{
 			"model":              "claude-sonnet-4-5",
 			"prompt_tokens":      -1,
 			"cache_read_tokens":  0,
 			"cache_write_tokens": 0,
-		},
-		testWorkspaceID, "legit-daemon")
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("taskId", taskID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		}},
+		{"cache_read_tokens", map[string]any{
+			"model":              "claude-sonnet-4-5",
+			"prompt_tokens":      0,
+			"cache_read_tokens":  -1,
+			"cache_write_tokens": 0,
+		}},
+		{"cache_write_tokens", map[string]any{
+			"model":              "claude-sonnet-4-5",
+			"prompt_tokens":      0,
+			"cache_read_tokens":  0,
+			"cache_write_tokens": -1,
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/context-update",
+				tc.body,
+				testWorkspaceID, "legit-daemon")
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("taskId", taskID)
+			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
-	testHandler.ReportTaskContextUpdate(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for negative tokens, got %d: %s", w.Code, w.Body.String())
+			testHandler.ReportTaskContextUpdate(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("%s: status = %d, want 400; body=%s", tc.name, w.Code, w.Body.String())
+			}
+		})
 	}
 }

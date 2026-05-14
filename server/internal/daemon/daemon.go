@@ -2444,6 +2444,13 @@ const contextUpdateThrottle = 500 * time.Millisecond
 // context-update upload for taskID was within contextUpdateThrottle ago.
 // On a non-throttled call it also records the new timestamp so subsequent
 // callers within the window are skipped.
+//
+// The check is load-then-maybe-store, NOT atomic — correctness depends on
+// the caller being a single goroutine per task. The drain loop in
+// executeAndDrain satisfies this: each task has exactly one drain
+// goroutine, so two concurrent calls for the same taskID cannot race. If
+// a future refactor allows parallel reporters per task, switch to
+// LoadOrStore + compare.
 func (d *Daemon) shouldThrottleContextUpdate(taskID string) bool {
 	now := time.Now()
 	if prev, ok := d.contextUpdateLast.Load(taskID); ok {
@@ -2465,15 +2472,20 @@ func (d *Daemon) clearContextUpdateThrottle(taskID string) {
 // reportContextUpdate fires a non-blocking context-size snapshot upload for
 // the current turn. Errors are logged at debug level and swallowed — this
 // is purely a UI hint and must never block task execution. The 5s
-// context.WithTimeout matches other daemon best-effort uploads.
-func (d *Daemon) reportContextUpdate(taskID, model string, promptTokens, cacheReadTokens, cacheWriteTokens int64, taskLog *slog.Logger) {
+// context.WithTimeout matches other daemon best-effort uploads. The upload
+// ctx is derived from the caller-supplied drain ctx so daemon shutdown
+// propagates cancellation; the goroutine is registered with d.bgSyncs so
+// graceful shutdown waits for in-flight uploads to settle.
+func (d *Daemon) reportContextUpdate(ctx context.Context, taskID, model string, promptTokens, cacheReadTokens, cacheWriteTokens int64, taskLog *slog.Logger) {
 	if d.shouldThrottleContextUpdate(taskID) {
 		return
 	}
+	d.bgSyncs.Add(1)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer d.bgSyncs.Done()
+		uploadCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		if err := d.client.ReportTaskContextUpdate(ctx, taskID, model, promptTokens, cacheReadTokens, cacheWriteTokens); err != nil {
+		if err := d.client.ReportTaskContextUpdate(uploadCtx, taskID, model, promptTokens, cacheReadTokens, cacheWriteTokens); err != nil {
 			taskLog.Debug("report task context update failed", "error", err)
 		}
 	}()
@@ -2648,7 +2660,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					// only (non-cumulative). The helper handles throttling
 					// + fire-and-forget upload so the drain loop never
 					// blocks on the WS bus.
-					d.reportContextUpdate(taskID, msg.Model, msg.PromptTokens, msg.CacheReadTokens, msg.CacheWriteTokens, taskLog)
+					d.reportContextUpdate(drainCtx, taskID, msg.Model, msg.PromptTokens, msg.CacheReadTokens, msg.CacheWriteTokens, taskLog)
 				}
 			case <-drainCtx.Done():
 				goto drainDone
