@@ -216,8 +216,9 @@ func (h *Handler) publishTask(eventType, workspaceID, actorType, actorID, taskID
 // window via agent.ContextWindowFor and injects it into the payload so the
 // frontend doesn't need a parallel lookup table.
 //
-// Routed to the per-task scope (TaskID hint) so only subscribers watching
-// this task receive the high-frequency turn pings.
+// TaskID hint is set for future per-task scope routing; today the bus → WS
+// bridge (cmd/server/listeners.go) still broadcasts task events on workspace
+// fanout, so every connected client in the workspace receives these pings.
 func (h *Handler) PublishTaskUsageUpdate(workspaceID, taskID, agentID, issueID, model string, promptTokens, cacheReadTokens, cacheWriteTokens int64) {
 	payload := protocol.TaskUsageUpdatePayload{
 		TaskID:           taskID,

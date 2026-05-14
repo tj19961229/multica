@@ -2475,7 +2475,9 @@ func (d *Daemon) clearContextUpdateThrottle(taskID string) {
 // context.WithTimeout matches other daemon best-effort uploads. The upload
 // ctx is derived from the caller-supplied drain ctx so daemon shutdown
 // propagates cancellation; the goroutine is registered with d.bgSyncs so
-// graceful shutdown waits for in-flight uploads to settle.
+// test teardown (via waitBackgroundSyncs) can wait for in-flight uploads.
+// Production Run() does not Wait on bgSyncs — the 5s upload timeout caps
+// any shutdown delay on its own.
 func (d *Daemon) reportContextUpdate(ctx context.Context, taskID, model string, promptTokens, cacheReadTokens, cacheWriteTokens int64, taskLog *slog.Logger) {
 	if d.shouldThrottleContextUpdate(taskID) {
 		return
