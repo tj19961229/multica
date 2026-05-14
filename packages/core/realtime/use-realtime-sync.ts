@@ -61,10 +61,12 @@ import type {
   TaskCompletedPayload,
   TaskFailedPayload,
   TaskCancelledPayload,
+  TaskUsageUpdatePayload,
   ChatDonePayload,
   ChatPendingTask,
   InvitationCreatedPayload,
 } from "../types";
+import { useTaskContextStore } from "../issues/stores/task-context-store";
 
 const chatWsLogger = createLogger("chat.ws");
 
@@ -629,6 +631,7 @@ export function useRealtimeSync(
     //      forever in the second-tab scenario.
     const unsubTaskCancelled = ws.on("task:cancelled", (p) => {
       const payload = p as TaskCancelledPayload;
+      useTaskContextStore.getState().remove(payload.task_id);
       if (!payload.chat_session_id) return;
       chatWsLogger.info("task:cancelled (global, chat)", {
         task_id: payload.task_id,
@@ -640,6 +643,7 @@ export function useRealtimeSync(
 
     const unsubTaskCompleted = ws.on("task:completed", (p) => {
       const payload = p as TaskCompletedPayload;
+      useTaskContextStore.getState().remove(payload.task_id);
       if (!payload.chat_session_id) return; // issue tasks handled elsewhere
       chatWsLogger.info("task:completed (global, chat)", {
         task_id: payload.task_id,
@@ -653,6 +657,7 @@ export function useRealtimeSync(
 
     const unsubTaskFailed = ws.on("task:failed", (p) => {
       const payload = p as TaskFailedPayload;
+      useTaskContextStore.getState().remove(payload.task_id);
       if (!payload.chat_session_id) return;
       chatWsLogger.warn("task:failed (global, chat)", {
         task_id: payload.task_id,
@@ -668,6 +673,13 @@ export function useRealtimeSync(
       qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
+    });
+
+    // task:usage_update — ephemeral context-window size for a running task.
+    // Per-turn snapshot, NOT cumulative. Cleared on task:completed/failed/
+    // cancelled above. Pure client store; no query cache touch.
+    const unsubTaskUsageUpdate = ws.on("task:usage_update", (p) => {
+      useTaskContextStore.getState().set(p as TaskUsageUpdatePayload);
     });
 
     const unsubChatSessionRead = ws.on("chat:session_read", (p) => {
@@ -734,6 +746,7 @@ export function useRealtimeSync(
       unsubTaskCancelled();
       unsubTaskCompleted();
       unsubTaskFailed();
+      unsubTaskUsageUpdate();
       unsubChatSessionRead();
       unsubChatSessionDeleted();
       timers.forEach(clearTimeout);
