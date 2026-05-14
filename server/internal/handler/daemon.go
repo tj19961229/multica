@@ -1601,6 +1601,89 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// TaskContextUpdatePayload carries the most recent Claude turn's prompt-size
+// snapshot. Non-cumulative: each turn overwrites the previous broadcast.
+// Distinct from ReportTaskUsage which records billing-style cumulative totals.
+type TaskContextUpdatePayload struct {
+	Model            string `json:"model"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+}
+
+// ReportTaskContextUpdate is a thin pass-through that broadcasts the current
+// turn's context-window snapshot over the WS bus. No DB writes — this is a
+// UI hint, distinct from ReportTaskUsage which persists billing totals.
+//
+// The task must be in_progress (otherwise the frontend has nothing to render
+// the snapshot against) and belong to the caller's workspace.
+func (h *Handler) ReportTaskContextUpdate(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+
+	// Verify the caller owns this task's workspace and load the task row so
+	// we can resolve agent/issue/workspace IDs for the broadcast.
+	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
+	if !ok {
+		return
+	}
+
+	var req TaskContextUpdatePayload
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Token counts are unsigned by nature. Negative values indicate a
+	// malformed payload — reject loudly so a buggy caller is visible.
+	if req.PromptTokens < 0 || req.CacheReadTokens < 0 || req.CacheWriteTokens < 0 {
+		writeError(w, http.StatusBadRequest, "token counts must be non-negative")
+		return
+	}
+
+	// Only broadcast for active tasks. A completed/failed task has nothing
+	// to update — the frontend already cleared the meter on the lifecycle
+	// event and a stale snapshot would re-paint a closed window. Valid
+	// active statuses match the DB CHECK constraint on agent_task_queue.
+	if task.Status != "running" && task.Status != "dispatched" {
+		writeError(w, http.StatusNotFound, "task not active")
+		return
+	}
+
+	workspaceID := h.TaskService.ResolveTaskWorkspaceID(r.Context(), task)
+	if workspaceID == "" {
+		// requireDaemonTaskAccess already validated workspace access, so an
+		// empty result here means a race (task deleted between the load and
+		// now) — 404 keeps the daemon's error-handling consistent.
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
+	// Resolve the model. Body-provided model wins; otherwise fall back to
+	// the agent's configured default so the frontend can still resolve a
+	// max-context window. Empty model is acceptable — ContextWindowFor
+	// returns a conservative default.
+	model := req.Model
+	if model == "" {
+		agentRow, err := h.Queries.GetAgent(r.Context(), task.AgentID)
+		if err == nil && agentRow.Model.Valid {
+			model = agentRow.Model.String
+		}
+	}
+
+	h.PublishTaskUsageUpdate(
+		workspaceID,
+		uuidToString(task.ID),
+		uuidToString(task.AgentID),
+		uuidToString(task.IssueID),
+		model,
+		req.PromptTokens,
+		req.CacheReadTokens,
+		req.CacheWriteTokens,
+	)
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // GetTaskStatus returns the current status of a task.
 // Used by the daemon to check whether a task was cancelled mid-execution.
 func (h *Handler) GetTaskStatus(w http.ResponseWriter, r *http.Request) {

@@ -247,6 +247,18 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 		u.CacheReadTokens += content.Usage.CacheReadInputTokens
 		u.CacheWriteTokens += content.Usage.CacheCreationInputTokens
 		usage[content.Model] = u
+
+		// Emit a per-turn snapshot so downstream consumers (daemon) can
+		// broadcast a live context-window meter. Non-cumulative — each
+		// event carries only this turn's tokens; the daemon throttles the
+		// fanout to avoid flooding the WS bus on chatty turns.
+		trySend(ch, Message{
+			Type:             MessageUsage,
+			Model:            content.Model,
+			PromptTokens:     content.Usage.InputTokens,
+			CacheReadTokens:  content.Usage.CacheReadInputTokens,
+			CacheWriteTokens: content.Usage.CacheCreationInputTokens,
+		})
 	}
 
 	for _, block := range content.Content {

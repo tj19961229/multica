@@ -154,6 +154,73 @@ func TestClaudeHandleControlRequestAutoApproves(t *testing.T) {
 	}
 }
 
+// TestClaudeHandleAssistantEmitsUsage verifies that when an assistant message
+// carries a Usage block, handleAssistant emits a MessageUsage event in
+// addition to its usual content. Daemon consumes this for the per-turn
+// context-window broadcast.
+func TestClaudeHandleAssistantEmitsUsage(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+	var output strings.Builder
+
+	msg := claudeSDKMessage{
+		Type: "assistant",
+		Message: mustMarshal(t, claudeMessageContent{
+			Role:  "assistant",
+			Model: "claude-sonnet-4-6",
+			Content: []claudeContentBlock{
+				{Type: "text", Text: "hi"},
+			},
+			Usage: &claudeUsage{
+				InputTokens:              1234,
+				OutputTokens:             56,
+				CacheReadInputTokens:     7890,
+				CacheCreationInputTokens: 42,
+			},
+		}),
+	}
+
+	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage))
+
+	// Drain channel: expect a MessageUsage AND a MessageText, in any order.
+	var sawUsage, sawText bool
+	for i := 0; i < 2; i++ {
+		select {
+		case m := <-ch:
+			switch m.Type {
+			case MessageUsage:
+				sawUsage = true
+				if m.Model != "claude-sonnet-4-6" {
+					t.Fatalf("MessageUsage.Model = %q, want %q", m.Model, "claude-sonnet-4-6")
+				}
+				if m.PromptTokens != 1234 {
+					t.Fatalf("MessageUsage.PromptTokens = %d, want 1234", m.PromptTokens)
+				}
+				if m.CacheReadTokens != 7890 {
+					t.Fatalf("MessageUsage.CacheReadTokens = %d, want 7890", m.CacheReadTokens)
+				}
+				if m.CacheWriteTokens != 42 {
+					t.Fatalf("MessageUsage.CacheWriteTokens = %d, want 42", m.CacheWriteTokens)
+				}
+			case MessageText:
+				sawText = true
+			default:
+				t.Fatalf("unexpected message type: %v", m.Type)
+			}
+		default:
+			t.Fatalf("expected 2 messages on channel, got %d (usage=%v text=%v)", i, sawUsage, sawText)
+		}
+	}
+	if !sawUsage {
+		t.Fatal("expected a MessageUsage event but none was emitted")
+	}
+	if !sawText {
+		t.Fatal("expected a MessageText event alongside MessageUsage")
+	}
+}
+
 func TestClaudeHandleAssistantInvalidJSON(t *testing.T) {
 	t.Parallel()
 

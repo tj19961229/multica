@@ -203,6 +203,19 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 	}, nil)
 }
 
+// ReportTaskContextUpdate posts a single Claude turn's context-window
+// snapshot. This is a UI hint (fire-and-forget on the caller side) — the
+// server broadcasts it over the WS bus and never persists it. Distinct from
+// ReportTaskUsage which records cumulative billing totals.
+func (c *Client) ReportTaskContextUpdate(ctx context.Context, taskID, model string, promptTokens, cacheReadTokens, cacheWriteTokens int64) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/context-update", taskID), map[string]any{
+		"model":              model,
+		"prompt_tokens":      promptTokens,
+		"cache_read_tokens":  cacheReadTokens,
+		"cache_write_tokens": cacheWriteTokens,
+	}, nil)
+}
+
 func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, failureReason string) error {
 	body := map[string]any{"error": errMsg}
 	if sessionID != "" {

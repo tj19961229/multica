@@ -54,6 +54,12 @@ const (
 	MessageStatus     MessageType = "status"
 	MessageError      MessageType = "error"
 	MessageLog        MessageType = "log"
+	// MessageUsage carries a single turn's token usage snapshot. Emitted at
+	// every Claude turn boundary (one per assistant message that includes a
+	// usage block). Non-cumulative: each event represents this turn only.
+	// Consumed by the daemon to broadcast a context-window meter via the WS
+	// bus without waiting for task completion.
+	MessageUsage MessageType = "usage"
 )
 
 // Message is a unified event emitted by an agent during execution.
@@ -67,6 +73,14 @@ type Message struct {
 	Status    string         // agent status string (Status)
 	Level     string         // log level (Log)
 	SessionID string         // backend session id (Status), for early resume-pointer pinning
+
+	// Usage-only fields (set when Type == MessageUsage). PromptTokens is
+	// this turn's new input tokens; CacheReadTokens / CacheWriteTokens are
+	// the SDK's cache_read_input_tokens / cache_creation_input_tokens.
+	Model            string
+	PromptTokens     int64
+	CacheReadTokens  int64
+	CacheWriteTokens int64
 }
 
 // TokenUsage tracks token consumption for a single model.
