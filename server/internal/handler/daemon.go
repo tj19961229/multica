@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -1681,6 +1682,20 @@ func (h *Handler) ReportTaskContextUpdate(w http.ResponseWriter, r *http.Request
 		req.CacheWriteTokens,
 	)
 
+	// Persist max/latest snapshot for the historical/aggregated views (e.g.
+	// GetIssueAgentContexts). The WS publish above is the primary side
+	// effect — UI updates live via the bus — so a DB hiccup must not fail
+	// the request: log and continue.
+	if err := h.Queries.UpsertTaskContextState(r.Context(), db.UpsertTaskContextStateParams{
+		TaskID:              task.ID,
+		Model:               model,
+		MaxPromptTokens:     req.PromptTokens,
+		MaxCacheReadTokens:  req.CacheReadTokens,
+		MaxCacheWriteTokens: req.CacheWriteTokens,
+	}); err != nil {
+		slog.Warn("upsert task_context_state failed", "task_id", taskID, "error", err)
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -2030,6 +2045,35 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 		"total_cache_write_tokens": row.TotalCacheWriteTokens,
 		"task_count":               row.TaskCount,
 	})
+}
+
+// GetIssueAgentContexts returns each agent's max context window occupancy on
+// this issue, plus the latest task's status/model so the UI can render a
+// status badge and pick the right model context window. Trigger-agnostic —
+// works for cloud and local-daemon agents alike.
+func (h *Handler) GetIssueAgentContexts(w http.ResponseWriter, r *http.Request) {
+	issueID := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, issueID)
+	if !ok {
+		return
+	}
+	rows, err := h.Queries.GetIssueAgentContexts(r.Context(), issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get agent contexts")
+		return
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, map[string]any{
+			"agent_id":                uuidToString(row.AgentID),
+			"max_context_tokens_seen": row.MaxContextTokensSeen,
+			"latest_task_id":          uuidToString(row.LatestTaskID),
+			"latest_task_status":      row.LatestTaskStatus,
+			"latest_model":            row.LatestModel,
+			"max_context_tokens":      agent.ContextWindowFor(row.LatestModel),
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // GetIssueGCCheck returns minimal issue info needed by the daemon GC loop.
