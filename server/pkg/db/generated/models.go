@@ -448,6 +448,18 @@ type SkillFile struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type TaskContextState struct {
+	TaskID                 pgtype.UUID        `json:"task_id"`
+	Model                  string             `json:"model"`
+	MaxPromptTokens        int64              `json:"max_prompt_tokens"`
+	MaxCacheReadTokens     int64              `json:"max_cache_read_tokens"`
+	MaxCacheWriteTokens    int64              `json:"max_cache_write_tokens"`
+	LatestPromptTokens     int64              `json:"latest_prompt_tokens"`
+	LatestCacheReadTokens  int64              `json:"latest_cache_read_tokens"`
+	LatestCacheWriteTokens int64              `json:"latest_cache_write_tokens"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
 type TaskMessage struct {
 	ID        pgtype.UUID        `json:"id"`
 	TaskID    pgtype.UUID        `json:"task_id"`
