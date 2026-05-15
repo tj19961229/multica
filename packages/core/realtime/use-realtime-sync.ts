@@ -632,6 +632,9 @@ export function useRealtimeSync(
     const unsubTaskCancelled = ws.on("task:cancelled", (p) => {
       const payload = p as TaskCancelledPayload;
       useTaskContextStore.getState().remove(payload.task_id);
+      if (payload.issue_id) {
+        qc.invalidateQueries({ queryKey: issueKeys.agentContexts(payload.issue_id) });
+      }
       if (!payload.chat_session_id) return;
       chatWsLogger.info("task:cancelled (global, chat)", {
         task_id: payload.task_id,
@@ -644,6 +647,9 @@ export function useRealtimeSync(
     const unsubTaskCompleted = ws.on("task:completed", (p) => {
       const payload = p as TaskCompletedPayload;
       useTaskContextStore.getState().remove(payload.task_id);
+      if (payload.issue_id) {
+        qc.invalidateQueries({ queryKey: issueKeys.agentContexts(payload.issue_id) });
+      }
       if (!payload.chat_session_id) return; // issue tasks handled elsewhere
       chatWsLogger.info("task:completed (global, chat)", {
         task_id: payload.task_id,
@@ -658,6 +664,9 @@ export function useRealtimeSync(
     const unsubTaskFailed = ws.on("task:failed", (p) => {
       const payload = p as TaskFailedPayload;
       useTaskContextStore.getState().remove(payload.task_id);
+      if (payload.issue_id) {
+        qc.invalidateQueries({ queryKey: issueKeys.agentContexts(payload.issue_id) });
+      }
       if (!payload.chat_session_id) return;
       chatWsLogger.warn("task:failed (global, chat)", {
         task_id: payload.task_id,

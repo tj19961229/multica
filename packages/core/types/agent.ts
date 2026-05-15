@@ -246,6 +246,21 @@ export interface IssueUsageSummary {
   task_count: number;
 }
 
+// Per-agent aggregated context-window occupancy on a single issue.
+// Returned by GET /api/issues/{id}/agent-contexts. max_context_tokens_seen is
+// the largest (prompt + cache_read) tokens any of this agent's tasks ever
+// reached; max_context_tokens is the model's full window (200k for Sonnet,
+// 1M for Opus 4.7-1m, etc.) for the latest task. Frontend renders a progress
+// bar X / Y where X = max_context_tokens_seen, Y = max_context_tokens.
+export interface IssueAgentContextRow {
+  agent_id: string;
+  max_context_tokens_seen: number;
+  latest_task_id: string;
+  latest_task_status: "queued" | "dispatched" | "running" | "completed" | "failed" | "cancelled";
+  latest_model: string;
+  max_context_tokens: number;
+}
+
 export interface RuntimeUsage {
   runtime_id: string;
   date: string;

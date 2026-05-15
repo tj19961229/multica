@@ -28,6 +28,12 @@ export const issueKeys = {
   subscribers: (issueId: string) =>
     ["issues", "subscribers", issueId] as const,
   usage: (issueId: string) => ["issues", "usage", issueId] as const,
+  /** Per-issue, per-agent max context-window occupancy — backs the
+   *  "Agent context" section of the issue detail page. Invalidated on
+   *  task:completed/failed/cancelled so the just-finished task's max
+   *  flows into view. */
+  agentContexts: (issueId: string) =>
+    ["issues", "agent-contexts", issueId] as const,
   /** Issue-level attachments — used by the description editor so its
    *  inline file-card / image NodeViews can re-sign download URLs at
    *  click time. */
@@ -171,6 +177,13 @@ export function issueUsageOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.usage(issueId),
     queryFn: () => api.getIssueUsage(issueId),
+  });
+}
+
+export function issueAgentContextsOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.agentContexts(issueId),
+    queryFn: () => api.getIssueAgentContexts(issueId),
   });
 }
 
