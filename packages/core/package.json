@@ -81,6 +81,7 @@
     "./provider": "./provider.tsx",
     "./logger": "./logger.ts",
     "./utils": "./utils.ts",
+    "./format/*": "./format/*.ts",
     "./constants/*": "./constants/*.ts",
     "./platform": "./platform/index.ts",
     "./analytics": "./analytics/index.ts",

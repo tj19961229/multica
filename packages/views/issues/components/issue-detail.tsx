@@ -52,6 +52,7 @@ import { collectThreadReplies } from "./thread-utils";
 import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
+import { IssueAgentContextsSection } from "./issue-agent-contexts-section";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -950,6 +951,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>}
         </div>
       )}
+
+      {/* Agent contexts — per-agent max context-window occupancy across this
+          issue's tasks. Self-hides when no agent has run. */}
+      <IssueAgentContextsSection issueId={id} />
     </div>
   );
 

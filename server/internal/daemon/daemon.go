@@ -106,6 +106,14 @@ type Daemon struct {
 	// goroutine can race against t.TempDir cleanup, leaving a partially
 	// deleted bare clone and an unrelated `not empty` cleanup failure.
 	bgSyncs sync.WaitGroup
+
+	// contextUpdateLast records the timestamp of the most recent
+	// per-turn context-update upload, keyed by task_id. Multi-tool turns
+	// can fire usage messages back-to-back at sub-100ms intervals, so we
+	// throttle uploads to one per 500ms per task — the WS bus would
+	// otherwise flood with redundant snapshots. Pure UI hint, no
+	// correctness impact if a turn is skipped.
+	contextUpdateLast sync.Map // map[string]time.Time
 }
 
 // New creates a new Daemon instance.
@@ -1811,6 +1819,10 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	d.mu.Unlock()
 	provider := rt.Provider
 
+	// Drop per-task throttle state on task exit so the sync.Map does not
+	// accumulate stale keys over the daemon's lifetime.
+	defer d.clearContextUpdateThrottle(task.ID)
+
 	// Task-scoped logger with short ID for readable concurrent logs.
 	taskLog := d.logger.With("task", shortID(task.ID))
 	agentName := "agent"
@@ -2421,6 +2433,66 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 }
 
+// contextUpdateThrottle caps per-task context-update uploads to one per
+// 500ms. Multi-tool turns can fire usage messages back-to-back at sub-100ms
+// intervals; without this cap, the WS bus would flood with redundant
+// snapshots. Pure UI hint — skipping a turn is fine because the next turn
+// overrides it.
+const contextUpdateThrottle = 500 * time.Millisecond
+
+// shouldThrottleContextUpdate reports whether the most recent per-turn
+// context-update upload for taskID was within contextUpdateThrottle ago.
+// On a non-throttled call it also records the new timestamp so subsequent
+// callers within the window are skipped.
+//
+// The check is load-then-maybe-store, NOT atomic — correctness depends on
+// the caller being a single goroutine per task. The drain loop in
+// executeAndDrain satisfies this: each task has exactly one drain
+// goroutine, so two concurrent calls for the same taskID cannot race. If
+// a future refactor allows parallel reporters per task, switch to
+// LoadOrStore + compare.
+func (d *Daemon) shouldThrottleContextUpdate(taskID string) bool {
+	now := time.Now()
+	if prev, ok := d.contextUpdateLast.Load(taskID); ok {
+		if last, ok := prev.(time.Time); ok && now.Sub(last) < contextUpdateThrottle {
+			return true
+		}
+	}
+	d.contextUpdateLast.Store(taskID, now)
+	return false
+}
+
+// clearContextUpdateThrottle drops the per-task throttle state. Called once
+// a task reaches a terminal state so the sync.Map does not grow unbounded
+// over the daemon's lifetime.
+func (d *Daemon) clearContextUpdateThrottle(taskID string) {
+	d.contextUpdateLast.Delete(taskID)
+}
+
+// reportContextUpdate fires a non-blocking context-size snapshot upload for
+// the current turn. Errors are logged at debug level and swallowed — this
+// is purely a UI hint and must never block task execution. The 5s
+// context.WithTimeout matches other daemon best-effort uploads. The upload
+// ctx is derived from the caller-supplied drain ctx so daemon shutdown
+// propagates cancellation; the goroutine is registered with d.bgSyncs so
+// test teardown (via waitBackgroundSyncs) can wait for in-flight uploads.
+// Production Run() does not Wait on bgSyncs — the 5s upload timeout caps
+// any shutdown delay on its own.
+func (d *Daemon) reportContextUpdate(ctx context.Context, taskID, model string, promptTokens, cacheReadTokens, cacheWriteTokens int64, taskLog *slog.Logger) {
+	if d.shouldThrottleContextUpdate(taskID) {
+		return
+	}
+	d.bgSyncs.Add(1)
+	go func() {
+		defer d.bgSyncs.Done()
+		uploadCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if err := d.client.ReportTaskContextUpdate(uploadCtx, taskID, model, promptTokens, cacheReadTokens, cacheWriteTokens); err != nil {
+			taskLog.Debug("report task context update failed", "error", err)
+		}
+	}()
+}
+
 // executeAndDrain runs a backend, drains its message stream (forwarding to the
 // server), and waits for the final result.
 func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID string) (agent.Result, int32, error) {
@@ -2584,6 +2656,13 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						Content: msg.Content,
 					})
 					mu.Unlock()
+				case agent.MessageUsage:
+					// Turn-boundary snapshot. The agent backend emits one
+					// MessageUsage per Claude turn with this turn's tokens
+					// only (non-cumulative). The helper handles throttling
+					// + fire-and-forget upload so the drain loop never
+					// blocks on the WS bus.
+					d.reportContextUpdate(drainCtx, taskID, msg.Model, msg.PromptTokens, msg.CacheReadTokens, msg.CacheWriteTokens, taskLog)
 				}
 			case <-drainCtx.Done():
 				goto drainDone

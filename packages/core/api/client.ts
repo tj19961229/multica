@@ -35,6 +35,7 @@ import type {
   CreatePersonalAccessTokenResponse,
   RuntimeUsage,
   IssueUsageSummary,
+  IssueAgentContextRow,
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
@@ -800,6 +801,10 @@ export class ApiClient {
 
   async getIssueUsage(issueId: string): Promise<IssueUsageSummary> {
     return this.fetch(`/api/issues/${issueId}/usage`);
+  }
+
+  async getIssueAgentContexts(issueId: string): Promise<IssueAgentContextRow[]> {
+    return this.fetch(`/api/issues/${issueId}/agent-contexts`);
   }
 
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {

@@ -28,6 +28,7 @@ export type WSEventType =
   | "task:failed"
   | "task:message"
   | "task:cancelled"
+  | "task:usage_update"
   | "inbox:new"
   | "inbox:read"
   | "inbox:archived"
@@ -250,6 +251,23 @@ export interface TaskCancelledPayload {
   issue_id: string;
   chat_session_id?: string;
   status: string;
+}
+
+// Payload for task:usage_update — fired by daemon at every Claude turn boundary
+// during an active task. Tracks the most recent turn's prompt size (≈ current
+// conversation context). Consumer keeps latest per task_id and clears on
+// task:completed/failed/cancelled. NOT cumulative — distinct from IssueUsageSummary.
+export interface TaskUsageUpdatePayload {
+  task_id: string;
+  agent_id: string;
+  issue_id: string;
+  model: string;
+  /** input_tokens of the most recent Claude turn (includes cache hits). */
+  prompt_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  /** Max context window for the model, injected by backend. */
+  max_context_tokens: number;
 }
 
 export interface ReactionAddedPayload {
