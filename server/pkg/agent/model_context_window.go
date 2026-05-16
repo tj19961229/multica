@@ -25,11 +25,18 @@ func ContextWindowFor(model string) int64 {
 }
 
 var contextWindows = map[string]int64{
-	"claude-opus-4-7":     200_000,
+	// 1M context window — GA since 2026-03-13, standard pricing.
+	"claude-opus-4-7": 1_000_000,
+	// Explicit bracketed alias: ContextWindowFor's date-suffix strip does not
+	// touch a trailing "[1m]", so without this entry a "[1m]" model would miss
+	// the map and wrongly fall back to 200_000.
 	"claude-opus-4-7[1m]": 1_000_000,
-	"claude-sonnet-4-6":   200_000,
-	"claude-haiku-4-5":    200_000,
-	"claude-3-5-sonnet":   200_000,
-	"claude-3-5-haiku":    200_000,
-	"claude-3-7-sonnet":   200_000,
+	"claude-opus-4-6":     1_000_000,
+	"claude-sonnet-4-6":   1_000_000,
+	// 200k context window.
+	"claude-sonnet-4-5": 200_000,
+	"claude-haiku-4-5":  200_000,
+	"claude-3-7-sonnet": 200_000,
+	"claude-3-5-sonnet": 200_000,
+	"claude-3-5-haiku":  200_000,
 }

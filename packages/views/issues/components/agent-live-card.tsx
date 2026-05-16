@@ -16,6 +16,7 @@ import {
 } from "../../common/task-transcript";
 import { useT } from "../../i18n";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
+import { LiveContextMeter } from "./context-meter";
 
 // AgentLiveCard renders a sticky banner at the top of the issue's main
 // column for every active task. Each banner shows "agent X is working",
@@ -340,6 +341,9 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
             <span className="text-muted-foreground shrink-0">{t(($) => $.agent_live.tool_count, { count: toolCount })}</span>
           )}
         </div>
+        {task.status === "running" && (
+          <LiveContextMeter taskId={task.id} className="ml-2 shrink-0" />
+        )}
         <div className="ml-auto flex items-center gap-1 shrink-0">
           {!isQueued && (
             <TranscriptButton
